@@ -1,2 +1,2 @@
 # MachineLearning
-Code for ML purposes
+Python code for ML purposes
