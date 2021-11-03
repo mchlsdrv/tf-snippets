@@ -8,6 +8,15 @@ __pycache__/
 
 # Compressed
 *.pickle
+*.pkl
+*.parq
+*.gz
+
+# TensorFlow
+*.pb
+*.v2
+*.profile-empty
+*.iml
 
 # Images
 *.jpeg
