@@ -159,10 +159,10 @@ if __name__ == '__main__':
     print(f'''
 Dataset Stats:
     Number of train images: {n}
-    Dimensions: 
-        > Train: 
+    Dimensions:
+        > Train:
             width = {w}, height = {h}, channels = {c}
-        > Test: 
+        > Test:
             width = {w_test}, height = {h_test}, channels = {c_test}
     ''')
 
