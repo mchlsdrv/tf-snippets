@@ -61,6 +61,13 @@ def load_image(image_file):
     return img, label
 
 
+def _fixup_shape(images, labels):
+    images.set_shape([128, 128, 1])
+    labels.set_shape([]) # I have 19 classes
+    # weights.set_shape([None])
+    return images, labels
+
+    
 def create_dataset():
     # 1) Rename the files to have consequent name
     idx = 1

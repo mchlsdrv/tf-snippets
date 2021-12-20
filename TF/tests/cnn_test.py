@@ -342,10 +342,12 @@ def conv_layer_vis(epoch, X, model, figure_configs, file_writer, logs, save_dir:
             tf.summary.image(f'{layer_name} feature map (epoch #{epoch})', figure_to_image(fig), step=epoch)
 
 
-
 if __name__=='__main__':
+    gpus = tf.config.list_physical_devices('GPU')
+    len(str(gpus[0]))
     print(tf.config.list_physical_devices('GPU'))
 
+    save_dir = Path('C:/Users/mchls/Desktop/Projects/Deep-Learning/TF/tests')
     # Load the data
     (X, y), (X_test, y_test) = cifar10.load_data()
     X, X_test = X.astype(np.float32) / 255.0, X_test.astype(np.float32) / 255.0
@@ -364,18 +366,28 @@ if __name__=='__main__':
         save_dir = Path('./filters')
     )
 
+
+    os.path.exists(save_dir)
+    checkpoint_path = save_dir / "training_2/cp-{epoch:04d}.ckpt"
+    checkpoint_dir = os.path.dirname(checkpoint_path)
     callbacks = [
         keras.callbacks.TensorBoard(
             log_dir=train_log_dir,
             write_images=True
         ),
-        feat_maps_callback
+        feat_maps_callback,
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath=checkpoint_path,
+            verbose=1,
+            save_weights_only=True,
+            save_freq=5*32
+        )
     ]
 
     res_net.compile(
         loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
         optimizer=keras.optimizers.Adam(learning_rate=3e-4),
-        metrics=['accuracy']
+        metrics=['accuracy'],
     )
 
     res_net.fit(
@@ -385,7 +397,11 @@ if __name__=='__main__':
         epochs=1,
         callbacks=callbacks
     )
-
+    latest_cpt = tf.train.latest_checkpoint(checkpoint_dir)
+    latest_cpt
+    res_net.load_weights(latest_cpt)
+    res_net.evaluate(X_test, y_test)
+    (save_dir / 'checkpoints').is_dir()
     layer_names = [layer.name for layer in res_net.model.layers]
     layer_names
     res_net.model.layers[0].name

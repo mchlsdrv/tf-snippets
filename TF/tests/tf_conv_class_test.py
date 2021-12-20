@@ -2,6 +2,7 @@ import os
 import datetime as dt
 import numpy as np
 import pathlib
+import pandas as pd
 from pathlib import Path
 import tensorflow as tf
 from tensorflow import keras
@@ -10,7 +11,8 @@ from tensorflow.keras.datasets import cifar10
 from tensorflow.keras import backend as K
 import matplotlib.pyplot as plt
 from tensorflow.python.keras.layers import Lambda
-
+from sklearn.neighbors import NearestNeighbors
+import cv2
 '''
 You can adjust the verbosity of the logs which are being printed by TensorFlow
 by changing the value of TF_CPP_MIN_LOG_LEVEL:
@@ -47,14 +49,15 @@ class ConvModel(keras.Model):
     def call(self, inputs):
         return self.model(inputs)
 
+    def save(self, save_path):
+        self.model.save(save_path)
 
 
 def strip_layer_name(layer_full_name, layer_index=''):
     layer_stripped_name = layer_full_name + layer_index
     if find_sub_string(layer_full_name, '_'):
         if find_sub_string(layer_full_name, 'conv'):
-            layer_full_name_bw = layer_full_name[::-1]
-            layer_stripped_name = layer_full_name[:layer_full_name_bw.index('_')] + layer_index
+            layer_stripped_name = layer_full_name.split('_')[-1] + layer_index
     return layer_stripped_name
 
 
@@ -84,7 +87,7 @@ class ConvLayerVis(keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         # 1) Get the layers
-        output_layers = [layer for layer in self.model.model.layers if find_sub_string(layer.name, 'conv2d') or find_sub_string(layer.name, 'max_pooling2d')]
+        output_layers = [layer for layer in self.model.model.layers if self.find_sub_string(layer.name, 'conv2d') or self.find_sub_string(layer.name, 'max_pooling2d')]
 
         # 3) Build partial model
         partial_model = keras.Model(
@@ -117,9 +120,40 @@ class ConvLayerVis(keras.callbacks.Callback):
         pass
 
 
+def get_patch_df(image_file, patch_height, patch_width):
+    assert image_file.is_file(), f'No file \'{image_file}\' was found!'
+
+    img = cv2.imread(str(image_file))
+    df = pd.DataFrame(columns=['file', 'image'])
+    img_h, img_w, _ = img.shape
+    for h in range(0, img_h, patch_height):
+        for w in range(0, img_w, patch_width):
+            patch = img[h:h+patch_height, w:w+patch_width, :]
+            df = df.append(dict(file=image_file, image=patch), ignore_index=True)
+    return df
+
+
+def transform_images(images_root_dir, model, patch_height, patch_width):
+    df = pd.DataFrame(columns=['file', 'image'])
+    for root, dirs, files in os.walk(images_root_dir):
+        for file in files:
+            df = df.append(get_patch_df(image_file=Path(f'{root}/{file}'), patch_height=patch_height, patch_width=patch_width), ignore_index=True)
+    df.loc[:, 'vector'] = df.loc[:, 'image'].apply(lambda x: model(np.expand_dims(x, axis=0)) if len(x.shape) < 4 else model(x))
+    return df
+
+def get_knn_files(X, files, k):
+    # Detect the k nearest neighbors
+    nbrs_pred = NearestNeighbors(n_neighbors=k, algorithm='ball_tree').fit(X)
+    nbrs_files = list()
+    for idx, (file, x) in enumerate(zip(files, X)):
+        _, nbrs_idxs = nbrs_pred.kneighbors(np.expand_dims(x, axis=0))
+        nbrs_files.append(files[nbrs_idxs])
+    return nbrs_files
+
 if __name__ == '__main__':
     print(tf.config.list_physical_devices('GPU'))
-
+    save_dir = Path('C:/Users/mchls/Desktop/Projects/Deep-Learning/TF/tests')
+    images_dir = Path(('C:/Users/mchls/Desktop/Projects/Data/antrax/train/10,000x - 41'))
     # Load the data
     (X, y), (X_test, y_test) = cifar10.load_data()
     X, X_test = X.astype(np.float32) / 255.0, X_test.astype(np.float32) / 255.0
@@ -128,47 +162,75 @@ if __name__ == '__main__':
 
     # Model with keras.Sequential
     model = ConvModel(input_shape=(w, h, c))
-    model.compile(loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True), optimizer=keras.optimizers.Adam(learning_rate=3e-4), metrics=['accuracy'])
+
+    model.compile(
+        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+        optimizer=keras.optimizers.Adam(learning_rate=3e-4),
+        metrics=['accuracy']
+    )
 
     train_log_dir = f'./logs/{dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}/train_data'
     train_file_writer = tf.summary.create_file_writer(train_log_dir)
-
-    feat_maps_callback = ConvLayerVis(
-        X = X,
-        figure_configs=dict(rows=8, cols=8, figsize=(15, 15), cmap='gray'),
-        file_writer=train_file_writer,
-        save_dir = Path('./filters')
-    )
 
     callbacks = [
         keras.callbacks.TensorBoard(
             log_dir=train_log_dir,
             write_images=True
         ),
-        feat_maps_callback
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath=save_dir / 'checkpoints',
+            verbose=1,
+            save_weights_only=True,
+            save_freq=5*32
+        )
     ]
-    model.fit(X, y, batch_size=64, epochs=10, callbacks=callbacks)
-    model.evaluate(X_test, y_test, batch_size=64)
-    model.model.summary()
 
-    partial_model = keras.Model(
-        inputs=model.model.input,
-        outputs=[
-            model.model.layers[0].output,
-            model.model.layers[3].output,
-            model.model.layers[6].output
-        ]
+    model.fit(
+        X,
+        y,
+        batch_size=64,
+        epochs=10,
+        callbacks=callbacks
     )
+    model.model.save(save_path / 'model.h5')
+    model_2 = tf.keras.models.load_model(save_path / 'model.h5')
 
-    x = np.random.randn(1, 32, 32, 3)
+    H = W = 32
+    df = transform_images(images_root_dir=images_dir, model=model, patch_height=H, patch_width=W)
+    df.shape
+    df.loc[0, 'vector'].shape
+    df.loc[0, 'image'].shape
+    plt.imshow(df.loc[0, 'image'])
+    df.to_pickle(save_dir / 'df.pkl')
+    df_1 = pd.read_pickle(save_dir/'df.pkl')
+    df_1
+    LS = [model_2.predict(np.expand_dims(x, axis=0)) for x in X]
+    LS = np.array(LS).reshape(50000, 10)
+    LS.shape
+    df.loc[:, 'vector'].values[0][0].numpy()
 
-    feats = partial_model.predict(x)
+    # Detect the k nearest neighbors
+    # X = np.array([x[0].numpy() for x in df.loc[:, 'vector'].values])
+    # files = df.loc[:, 'file'].values
+    # X.shape
+    # nbrs_pred = NearestNeighbors(n_neighbors=5, algorithm='ball_tree').fit(X)
+    # nbrs_pred
+    # nbrs_files = list()
+    # for idx, (file, x) in enumerate(zip(files, X)):
+    #     _, idxs = nbrs_pred.kneighbors(np.expand_dims(x, axis=0))
+    #     nbrs_files.append(files[idxs])
+    # nbrs_files
+    X = np.array([x[0].numpy() for x in df.loc[:, 'vector'].values])
+    files = df.loc[:, 'file'].values
+    df.loc[:, 'neighbors'] = get_knn_files(X=X, files=files, k=5)
+    df
+    plt.imshow(df.loc[2, 'image'])
 
-    cols = 8
-    rows = 8
-    for feat in feats:
-        fig, ax = plt.subplots(rows, cols, figsize=(15, 15))
-        for row in range(rows):
-            for col in range(cols):
-                ax[row][col].imshow(feat[0, :, :, row+col], cmap='gray')
-        plt.show()
+
+
+
+
+
+
+
+

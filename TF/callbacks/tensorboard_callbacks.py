@@ -30,7 +30,6 @@ class ConvLayerVis(keras.callbacks.Callback):
         if epoch % self.log_interval == 0:
             # 1) Get the layers
             output_layer_tuples = [(idx, layer) for idx, layer in enumerate(self.layers) if aux_funcs.find_sub_string(layer.name, 'conv2d') or aux_funcs.find_sub_string(layer.name, 'max_pooling2d')]
-            # output_layer_tuples = [(idx, layer) for idx, layer in enumerate(self.model.model.layers) if find_sub_string(layer.name, 'conv2d') or find_sub_string(layer.name, 'max_pooling2d')]
             output_layers = [layer_tuple[1].output for layer_tuple in output_layer_tuples]
 
             # 2) Get the layer names

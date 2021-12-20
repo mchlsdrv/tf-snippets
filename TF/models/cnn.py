@@ -29,6 +29,9 @@ class ConvModel(keras.Model):
     def call(self, inputs):
         return self.model(inputs)
 
+    def summary(self):
+        return self.model.summary()
+
 
 class ResNet(keras.Model):
     class ResBlock(keras.Model):

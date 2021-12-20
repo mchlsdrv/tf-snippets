@@ -19,7 +19,17 @@ by changing the value of TF_CPP_MIN_LOG_LEVEL:
     3 = INFO, WARNING, and ERROR messages are not printed
 '''
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+X = np.random.randn(10, 10)
+fig, ax = plt.subplots(1, 2, figsize=(10, 20))
 
+ax[0].imshow(X, cmap='gray')
+plt.show()
+
+fig, ax = plt.subplots(5, 5, figsize=(10, 10))
+
+for row in range(rows):
+    for col in range(cols):
+        ax[row][col].imshow(X, cmap='gray')
 DEBUG = False
 
 

@@ -24,119 +24,10 @@ from aux_code import aux_funcs
 DATA_PATH = Path('C:\\Users\\mchls\\Desktop\\Projects\\Data\\antrax')
 BATCH_SIZE = 32
 INPUT_IMAGE_SHAPE = (128, 128, 1)
-CENTRAL_CROP_PROP = .7
 CROP_SHAPE = INPUT_IMAGE_SHAPE
+CENTRAL_CROP_PROP = .7
 BRIGHTNESS_DELTA = 0.1
 CONTRAST = (0.4, 0.6)
-
-
-class ConvModel(keras.Model):
-    def __init__(self, input_shape):
-        super().__init__()
-        self.input_image_shape = input_shape
-        self.model = keras.Sequential([
-            layers.Input(shape=input_shape),
-            layers.Conv2D(32, 3),
-            layers.BatchNormalization(),
-            layers.ReLU(),
-            layers.MaxPool2D(),
-            layers.Conv2D(64, 5),
-            layers.BatchNormalization(),
-            layers.ReLU(),
-            layers.MaxPool2D(),
-            layers.Conv2D(128, 3, kernel_regularizer=keras.regularizers.l2(0.01)),
-            layers.BatchNormalization(),
-            layers.ReLU(),
-            layers.Flatten(),
-            layers.Dense(64, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01)),
-            layers.Dropout(0.5),
-            layers.Dense(10)
-        ])
-
-    def call(self, inputs):
-        return self.model(inputs)
-
-
-
-def figure_to_image(figure):
-    buffer = io.BytesIO()
-
-    plt.savefig(buffer, format='png')
-
-    plt.close(figure)
-    buffer.seek(0)
-
-    image = tf.image.decode_png(buffer.getvalue(), channels=4)
-    image = tf.expand_dims(image, 0)
-    return image
-
-def strip_layer_name(layer_full_name, layer_index=''):
-    layer_stripped_name = layer_full_name + layer_index
-    if find_sub_string(layer_full_name, '_'):
-        if find_sub_string(layer_full_name, 'conv'):
-            layer_full_name_bw = layer_full_name[::-1]
-            layer_stripped_name = layer_full_name[:layer_full_name_bw.index('_')] + layer_index
-    return layer_stripped_name
-
-def find_sub_string(string: str, sub_string: str):
-    return True if string.find(sub_string) > -1 else False
-
-class ConvLayerVis(keras.callbacks.Callback):
-    def __init__(self, X, figure_configs, file_writer, save_dir: pathlib.Path = None):
-        super().__init__()
-        self.X = X
-        self.file_writer = file_writer
-        self.figure_configs = figure_configs
-        self.save_dir = save_dir
-
-    @staticmethod
-    def find_sub_string(string: str, sub_string: str):
-        return True if string.find(sub_string) > -1 else False
-
-    @staticmethod
-    def figure_to_image(figure):
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        buffer.seek(0)
-        image = tf.image.decode_png(buffer.get_value(), channels=4)
-        image = tf.expand_dims(image, 0)
-        return image
-
-    def on_training_begin(self, logs=None):
-        pass
-
-    def on_epoch_end(self, epoch, logs=None):
-        # 1) Get the layers
-        output_layers = [layer.output for layer in self.model.model.layers if find_sub_string(layer.name, 'conv2d') or find_sub_string(layer.name, 'max_pooling2d')]
-
-        # 3) Build partial model
-        partial_model = keras.Model(
-            inputs=self.model.model.input,
-            outputs=output_layers
-        )
-
-        # 4) Get the feature maps
-        feature_maps = partial_model.predict(self.X)
-
-        # 5) Plot
-        rows, cols = self.figure_configs.get('rows'), self.figure_configs.get('cols')
-        for feature_map in feature_maps:
-            fig, ax = plt.subplots(rows, cols, figsize=self.figure_configs.get('figsize'))
-            for row in range(rows):
-                for col in range(cols):
-                    ax[row][col].imshow(feature_map[0, :, :, row+col], cmap=self.figure_configs.get('cmap'))
-
-            plt.show()
-
-            if isinstance(self.save_dir, pathlib.Path):
-                if not self.save_dir.is_dir():
-                    os.makedirs(self.save_dir)
-                    fig.savefig(self.save_dir / f'./Epoch_{epoch}.png')
-            with self.file_writer.as_default():
-                tf.summary.image(f' feature map (epoch #{epoch})', figure_to_image(fig), step=epoch)
-
-    def on_train_end(self, logs=None):
-        pass
 
 
 def preprocessing_func(image):
@@ -167,7 +58,7 @@ def load_image(image_file):
     img = preprocessing_func(image=img)
     img = augment(img)
     img = tf.cast(img, tf.float32)
-    img.set_shape([128, 128, 1])
+    img.set_shape(INPUT_IMAGE_SHAPE)
     # 3) Get the label
     label = tf.strings.split(image_file, "\\")[-1]
     label = tf.strings.substr(label, pos=0, len=1)
@@ -219,16 +110,21 @@ def create_dataset():
     #             # 4) Save the image
     #             aug_img.save(f'{label_dir}/{label}_{n}.tiff')
 
+def _fixup_shape(images, labels):
+    images.set_shape([128, 128, 1])
+    labels.set_shape([])
+    return images, labels
 
 if __name__=='__main__':
     # create_dataset()
 
     train_ds = tf.data.Dataset.list_files(str(DATA_PATH / 'train/10,000x - 48/*.tiff'))
-    train_ds = train_ds.map(lambda x: tf.numpy_function(load_image, [x], (tf.float32, tf.float32))).batch(BATCH_SIZE)
-    # train_ds = train_ds.batch(BATCH_SIZE)
-    # train_ds = train_ds.shuffle(buffer_size=1000)
-    # train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
-    # train_ds = train_ds.repeat()
+    train_ds = train_ds.map(lambda x: tf.numpy_function(load_image, [x], (tf.float32, tf.float32)))
+    train_ds = train_ds.map(_fixup_shape)
+    train_ds = train_ds.batch(BATCH_SIZE)
+    train_ds = train_ds.shuffle(buffer_size=1000)
+    train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
+    train_ds = train_ds.repeat()
 
     X, y = next(iter(train_ds))
     X.shape.as_list(), y.shape.as_list()
@@ -238,6 +134,7 @@ if __name__=='__main__':
         loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
         optimizer=keras.optimizers.Adam(learning_rate=3e-4),
         metrics=['accuracy']
+        # metrics=[tf.keras.metrics.Accuracy()]#'accuracy']
     )
     model.model.summary()
     train_log_dir = f'./logs/{dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}/train_data'
@@ -257,56 +154,41 @@ if __name__=='__main__':
         ),
         feat_maps_callback
     ]
-
+    # - with dataset
     model.fit(
         train_ds,
+        batch_size=32,
+        steps_per_epoch=10,
+        epochs=10,
+        callbacks=callbacks
+    )
+
+    # - with data generator
+    dg = ImageDataGenerator(
+        rescale=1./255,
+        rotation_range=5,
+        zoom_range=(0.95, 0.95),
+        horizontal_flip=True,
+        vertical_flip=True,
+        data_format='channels_last',
+        validation_split=0.1,
+        dtype=tf.float32
+    )
+
+    train_dg = dg.flow_from_directory(
+        DATA_PATH / 'train',
+        target_size=(128, 128),
+        batch_size=32,
+        color_mode='grayscale',
+        class_mode='sparse',
+        shuffle=True,
+        subset='training'
+    )
+    model.fit(
+        train_dg,
         # train_dg,
         batch_size=32,
         # steps_per_epoch=10,
         epochs=10,
         callbacks=callbacks
     )
-
-    dg = ImageDataGenerator(
-    rescale=1./255,
-    rotation_range=5,
-    zoom_range=(0.95, 0.95),
-    horizontal_flip=True,
-    vertical_flip=True,
-    data_format='channels_last',
-    validation_split=0.1,
-    dtype=tf.float32
-    )
-
-    train_dg = dg.flow_from_directory(
-    DATA_PATH / 'train',
-    target_size=(128, 128),
-    batch_size=32,
-    color_mode='grayscale',
-    class_mode='sparse',
-    shuffle=True,
-    subset='training'
-    )
-    img_file = 'C:\\Users\\mchls\\Desktop\\Projects\\Data\\antrax\\train\\10,000x - 48\\2.tiff'
-    img = cv2.imread(img_file, cv2.IMREAD_GRAYSCALE)
-    img = np.expand_dims(img, axis=-1)
-    img.shape
-    plt.imshow(img, cmap='gray')
-    type(img)
-    # img = np.array(Image.open(img_file))
-    # img = np.expand_dims(img, axis=-1)
-    # img.shape
-    # plt.imshow(img)
-    # train_ds = keras.preprocessing.image_dataset_from_directory(
-    #     DATA_PATH  / 'train',
-    #     labels='infered',
-    #     label_mode='int',
-    #     color_mode='grayscale',
-    #     batch_size=BATCH_SIZE,
-    #     image_size=IMAGE_SHAPE,
-    #     shuffle=True,
-    #     validation_split=0.1,
-    #     subset='training'
-    # )
-    #
-    # train_ds = train_ds.map(augment)
